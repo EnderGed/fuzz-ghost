@@ -1,6 +1,7 @@
 package com.smartseclab.fuzzghost;
 
 import android.content.Context;
+import android.support.v4.util.ArrayMap;
 import android.util.Log;
 
 import java.io.PrintWriter;
@@ -8,6 +9,8 @@ import java.io.StringWriter;
 import java.lang.reflect.Constructor;
 import java.lang.reflect.Method;
 import java.util.ArrayList;
+import java.util.Collections;
+import java.util.Map;
 import java.util.Random;
 
 /**
@@ -15,12 +18,21 @@ import java.util.Random;
  */
 public class TestExecutor {
 
-    Class<?> tClass;
-    Object tObject;
-    Context context;
-    String tag = getExecutorTag();
+    private Class<?> tClass;
+    private Object tObject;
+    private Context context;
+    private String tag = getExecutorTag();
+    private static final Map<String, String> classMap = createMap();
 
-    public static String getExecutorTag(){
+
+    public static Map<String, String> createMap() {
+        ArrayMap<String, String> map = new ArrayMap<String, String>();
+        map.put("WifiService", "com.android.net.wifi.WifiManager");
+        map.put("AudioService", "android.media.AudioManager");
+        return Collections.unmodifiableMap(map);
+    }
+
+    public static String getExecutorTag() {
         return MainActivity.getApplicationTag() + "Exe";
     }
 
@@ -29,10 +41,8 @@ public class TestExecutor {
         this.context = context;
         Class manager = null;
         try {
-            if (className.equals("WifiService"))
-                manager = loader.loadClass("com.android.net.wifi.WifiManager");
-            else if (className.equals("AudioService"))
-                manager = loader.loadClass("android.media.AudioManager");
+            if (classMap.containsKey(className))
+                manager = loader.loadClass(classMap.get(className));
             else {
                 Log.e(tag, "OMG! Unsupported class name: " + className);
                 throw new UnsupportedClassException();
@@ -153,19 +163,6 @@ public class TestExecutor {
         }
     }
 
-    private static Object getEmptyObjectFromClass(Class cl) {
-        if (cl.equals(Boolean.class)) {
-            return false;
-        }
-        if (cl.isPrimitive()) {
-            return 0;
-        }
-        if (cl.equals(String.class)) {
-            return "";
-        }
-        return null;
-    }
-
     public static Class getClassByName(String className) throws ClassNotFoundException {
         switch (className) {
             case "boolean":
@@ -227,13 +224,12 @@ public class TestExecutor {
         ClassLoader loader = context.getClassLoader();
         try {
             Class c = null;
-            if (className.equals("WifiService"))
-                c = loader.loadClass("com.android.server.wifi.WifiService");
-            else if (className.equals("AudioService"))
-                c = loader.loadClass("android.media.AudioService");
+            if (classMap.containsKey(className))
+                c = loader.loadClass(classMap.get(className));
             else
                 throw new UnsupportedClassException();
-            Method[] methods = c.getMethods();
+
+            Method[] methods = c.getDeclaredMethods();
             String[] result = new String[methods.length + 1];
             result[0] = "Class " + className + " methods:\n";
             for (int i = 0; i < methods.length; ++i) {
@@ -256,5 +252,9 @@ public class TestExecutor {
         } catch (Exception e) {
             throw e;
         }
+    }
+
+    public static boolean knowsClass(String className) {
+        return classMap.containsKey(className);
     }
 }

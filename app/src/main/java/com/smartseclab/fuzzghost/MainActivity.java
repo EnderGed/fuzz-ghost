@@ -90,4 +90,12 @@ public class MainActivity extends Activity {
         }
     }
 
+    @Override
+    protected  void onDestroy(){
+        try {
+            gt.closeClient();
+        }catch(Exception e){}
+        super.onDestroy();
+    }
+
 }
