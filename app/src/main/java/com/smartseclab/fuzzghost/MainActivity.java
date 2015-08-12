@@ -18,7 +18,7 @@ public class MainActivity extends Activity {
     public String address;
     public ArrayBlockingQueue<FuzzArgs> queue;
 
-    public static String getApplicationTag(){
+    public static String getApplicationTag() {
         return "FuzzGhost";
     }
 
@@ -52,38 +52,48 @@ public class MainActivity extends Activity {
         new Thread(gt).start();
     }
 
-    public void talk(){
+    public void talk() {
         TestExecutor executor;
         FuzzArgs fuzzArgs = null;
         while (true) {
             try {
                 Log.d(appTag, "Waiting for queue input.");
                 fuzzArgs = queue.take();
-                if(fuzzArgs.feierabend)
+                if (fuzzArgs.feierabend)
                     break;
                 Log.d(appTag, "Queue released an element; performing tests.");
-                int fails = 0;
-                //executor = new TestExecutor(this, fuzzArgs.className);
-                for (int j = 0; j < fuzzArgs.trials; ++j) {
+                if (fuzzArgs.argVals != null) {
+                    Log.d(appTag, "ArgVals not null!");
                     executor = new TestExecutor(this, fuzzArgs.className);
-                    if (!(executor.fuzzMethod(fuzzArgs.methodName, fuzzArgs.args)))
-                        ++fails;
+                    int fails = executor.runMethod(fuzzArgs.methodName, fuzzArgs.args, fuzzArgs.argVals) ? 0 : 1;
+                    Log.d(appTag, "Tests completed with " + fails + " / 1 errors.");
+                    gt.sendFailsMessage(fails);
+                    Log.d(appTag, "Finished.");
+                } else {
+                    Log.d(appTag, "ArgVals are null.");
+                    int fails = 0;
+                    //executor = new TestExecutor(this, fuzzArgs.className);
+                    for (int j = 0; j < fuzzArgs.trials; ++j) {
+                        executor = new TestExecutor(this, fuzzArgs.className);
+                        if (!(executor.fuzzMethod(fuzzArgs.methodName, fuzzArgs.args)))
+                            ++fails;
+                    }
+                    Log.d(appTag, "Tests completed with " + fails + " / " + fuzzArgs.trials + " errors.");
+                    gt.sendFailsMessage(fails);
+                    Log.d(appTag, "Finished.");
                 }
-                Log.d(appTag, "Tests completed with " + fails + " / " + fuzzArgs.trials + " errors.");
-                gt.sendFailsMessage(fails);
-                Log.d(appTag, "Finished.");
-            }catch (NoSuchMethodException nsme) {
-                    Log.e(appTag, "OMG", nsme);
-                try{
+            } catch (NoSuchMethodException nsme) {
+                Log.e(appTag, "OMG", nsme);
+                try {
                     gt.sendErrorMessage("No method " + fuzzArgs.methodName + " for specified args.");
-                }catch(Exception e){
+                } catch (Exception e) {
                     Log.e(appTag, "OMG", e);
                 }
             } catch (Exception e) {
                 Log.e(appTag, "OMG", e);
-                try{
+                try {
                     gt.sendErrorMessage(e.getClass().getName());
-                }catch(Exception e1){
+                } catch (Exception e1) {
                     Log.e(appTag, "OMG", e);
                 }
             }
@@ -91,10 +101,11 @@ public class MainActivity extends Activity {
     }
 
     @Override
-    protected  void onDestroy(){
+    protected void onDestroy() {
         try {
             gt.closeClient();
-        }catch(Exception e){}
+        } catch (Exception e) {
+        }
         super.onDestroy();
     }
 

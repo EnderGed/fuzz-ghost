@@ -61,15 +61,27 @@ public class TestExecutor {
 
     //Return true on success
     public boolean fuzzMethod(String methodName, Class[] argTypes) throws NoSuchMethodException {
+        try {
+            Object[] args = new Object[argTypes.length];
+            for (int i = 0; i < argTypes.length; ++i)
+                args[i] = getRandomObjectFromClass(context, argTypes[i]);
+            return runMethod(methodName, argTypes, args);
+        } catch (NoSuchMethodException nsme) {
+        throw nsme;
+    }
+    }
+
+    public boolean runMethod(String methodName, Class[] argTypes, Object[] args) throws NoSuchMethodException {
+        if(argTypes.length!=args.length){
+            Log.d(tag, "Arguments length does not equal types length; terminating.");
+            return false;
+        }
         Method method;
         Log.d(tag, "Test deployed [weeeeeooooooeeeeeeooooooo]");
         try {
             Log.d(tag, "Method name: " + methodName);
             Log.d(tag, "Arguments: " + argTypes.length);
             method = tClass.getDeclaredMethod(methodName, argTypes);
-            Object[] args = new Object[argTypes.length];
-            for (int i = 0; i < argTypes.length; ++i)
-                args[i] = getRandomObjectFromClass(context, argTypes[i]);
             method.invoke(tObject, args);
             return true;
         } catch (IllegalAccessException iae) {
