@@ -7,11 +7,15 @@ import android.util.Log;
 import java.io.PrintWriter;
 import java.io.StringWriter;
 import java.lang.reflect.Constructor;
+import java.lang.reflect.Field;
 import java.lang.reflect.Method;
 import java.util.ArrayList;
 import java.util.Collections;
+import java.util.HashMap;
 import java.util.Map;
 import java.util.Random;
+
+import generator.shadows.ParcelableShadow;
 
 /**
  * Created by smartseclab on 7/31/15.
@@ -67,12 +71,12 @@ public class TestExecutor {
                 args[i] = getRandomObjectFromClass(context, argTypes[i]);
             return runMethod(methodName, argTypes, args);
         } catch (NoSuchMethodException nsme) {
-        throw nsme;
-    }
+            throw nsme;
+        }
     }
 
     public boolean runMethod(String methodName, Class[] argTypes, Object[] args) throws NoSuchMethodException {
-        if(argTypes.length!=args.length){
+        if (argTypes.length != args.length) {
             Log.d(tag, "Arguments length does not equal types length; terminating.");
             return false;
         }
@@ -81,6 +85,14 @@ public class TestExecutor {
         try {
             Log.d(tag, "Method name: " + methodName);
             Log.d(tag, "Arguments: " + argTypes.length);
+            ClassLoader loader = context.getClassLoader();
+            for (int i = 0; i < argTypes.length; ++i) {
+                if (args[i] instanceof ParcelableShadow) {
+                    argTypes[i] = loader.loadClass(((ParcelableShadow) args[i]).getName());
+                    args[i] = readFromShadow((ParcelableShadow) args[i]);
+                }
+                Log.d(tag, argTypes[i].getName() + " " + args[i]);
+            }
             method = tClass.getDeclaredMethod(methodName, argTypes);
             method.invoke(tObject, args);
             return true;
@@ -93,6 +105,54 @@ public class TestExecutor {
             errorele(e);
             return false;
         }
+    }
+
+    //TODO: The constructor arguments should be obtained from the shadow object.
+    private Object readFromShadow(ParcelableShadow ps) {
+        Object instance;
+        try {
+            Class objType = context.getClassLoader().loadClass(ps.getName());
+            Constructor[] constructors = objType.getDeclaredConstructors();
+            if (constructors.length == 0) {
+                Log.d(tag, "No public constructors found. Looking for an empty private constructor.");
+                try {
+                    Constructor constructor = objType.getDeclaredConstructor();
+                    constructor.setAccessible(true);
+                    instance = constructor.newInstance();
+                } catch (Exception e) {
+                    Log.e(tag, "OMG", e);
+                    return null;
+                }
+            } else {
+                Object[] thisIsStupidRewriteThis = new Object[constructors[0].getParameterTypes().length];
+                for (int i = 0; i < thisIsStupidRewriteThis.length; ++i)
+                    thisIsStupidRewriteThis[i] = null;
+                try {
+                    constructors[0].setAccessible(true);
+                    instance = constructors[0].newInstance(thisIsStupidRewriteThis);
+                } catch (Exception e) {
+                    Log.e(tag, "OMG", e);
+                    return null;
+                }
+            }
+        } catch (ClassNotFoundException cnfe) {
+            Log.e(tag, "OMG", cnfe);
+            return null;
+        }
+        HashMap<String, Object> map = ps.getDataMap();
+        for(String key: map.keySet()){
+            try {
+                Field field = instance.getClass().getField(key);
+                field.setAccessible(true);
+                field.set(instance, map.get(key));
+            }catch(NoSuchFieldException nsfe){
+                Log.d(tag, "No such field: " + key + " in " + ps.getName());
+            }catch(IllegalAccessException iae){
+                Log.e(tag, "OMG", iae);
+            }
+        }
+        return instance;
+
     }
 
     public static String errorele(Exception e) {
