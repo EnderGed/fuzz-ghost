@@ -2,29 +2,26 @@ package com.smartseclab.fuzzghost;
 
 import android.util.Log;
 
-import junit.framework.Test;
-
+import java.io.IOException;
 import java.io.ObjectInputStream;
 import java.io.ObjectOutputStream;
-import java.net.ServerSocket;
 import java.net.Socket;
 import java.util.Arrays;
 import java.util.concurrent.ArrayBlockingQueue;
 
 /**
- * Created by smartseclab on 7/30/15.
+ * The task (actually a thread) responsible for the TCP communication.
  */
 public class GhostTask implements Runnable {
 
     private int port;
     private String address, tag, invalid, exceptionInterrupted, classNotInitiated, envSet, unknownClassName;
+    private String className = "";
     private MainActivity caller;
     private Socket cSocket;
     private ObjectOutputStream oos;
     private ObjectInputStream ois;
     private ArrayBlockingQueue<FuzzArgs> argsQueue;
-    private String className = "";
-
 
     public GhostTask(int port, String address, MainActivity caller, ArrayBlockingQueue<FuzzArgs> queue) {
         this.port = port;
@@ -32,10 +29,10 @@ public class GhostTask implements Runnable {
         this.argsQueue = queue;
         this.address = address;
         exceptionInterrupted = caller.getString(R.string.exceptionInterrupted);
-        classNotInitiated =  caller.getString(R.string.classNotInitiated);
+        classNotInitiated = caller.getString(R.string.classNotInitiated);
         invalid = caller.getString(R.string.invalid);
-        envSet =  caller.getString(R.string.envSet);
-        unknownClassName =  caller.getString(R.string.unknownClassName);
+        envSet = caller.getString(R.string.envSet);
+        unknownClassName = caller.getString(R.string.unknownClassName);
         tag = MainActivity.getApplicationTag() + "Task";
     }
 
@@ -43,219 +40,158 @@ public class GhostTask implements Runnable {
         try {
             cSocket = new Socket(address, port);
             Log.d(tag, "Client started at port " + port + ".");
-            handleSingleClient();
+            clientLoop();
         } catch (Exception e) {
-            Log.e(tag, "Crash Test OMG", e);
+            Log.e(tag, e.getMessage(), e);
         }
         closeClient();
     }
 
-    public void handleSingleClient() {
+    private void clientLoop() {
         try {
-            ois = new ObjectInputStream(cSocket.getInputStream());
-            oos = new ObjectOutputStream(cSocket.getOutputStream());
-            String[] received = (String[]) (ois.readObject());
-            if (received.length<1 || !(received[0].toLowerCase().equals("hello"))) {
-                Log.d(tag, "Invalid hello message (WTF Error). Exiting.");
-                sendErrorMessage("Invalid hello message. WTF?");
-                closeClient();
-                return;
-            }
-            if(received.length>1) {
-                if(!initiateClass(received[1]))
-                    Log.d(tag, classNotInitiated);
-            }
-            else{
-                Log.d(tag, classNotInitiated);
-                sendStringMessage(classNotInitiated);
-            }
+            startCommunication();
             while (true) {
-                Object receivedO = ois.readObject();
-                if (receivedO instanceof String[]) {
-                    received = (String[]) (receivedO);
-                    Log.d(tag, "New message received: " + received[0].toLowerCase());
-                    if (received[0].toLowerCase().equals("goodbye")) {
+                Object receivedObject = ois.readObject();
+                if (receivedObject instanceof String[]) {
+                    String[] receivedString = (String[]) (receivedObject);
+                    Log.d(tag, "Received a String array: " + receivedString[0].toLowerCase());
+                    if (receivedString[0].toLowerCase().equals("goodbye")) {
                         Log.d(tag, "Execution completed gracefully (server goodbye).");
                         break;
-                    }
-                    if (received[0].toLowerCase().equals("do")) {
-                        if (!className.equals("")) {
-                            if (received.length > 2) {
-                                String methodName = received[2];
-                                try {
-                                    int trials = Integer.parseInt(received[1]);
-                                    Class[] args = new Class[received.length - 3];
-                                    StringBuilder errorClasses = new StringBuilder("The following classes were not found:");
-                                    boolean wasClassError = false;
-                                    for (int i = 0; i < args.length; ++i)
-                                        try {
-                                            args[i] = TestExecutor.getClassByName(received[i + 3]);
-                                        } catch (ClassNotFoundException cnfe) {
-                                            Log.e(tag, "OMG", cnfe);
-                                            wasClassError = true;
-                                            errorClasses.append(" ");
-                                            errorClasses.append(received[i + 3]);
-                                        }
-                                    if (wasClassError) {
-                                        errorClasses.append(".");
-                                        Log.d(caller.appTag, "Error: classes not found: " + errorClasses.toString());
-                                        sendErrorMessage(errorClasses.toString());
-                                    } else {
-                                        argsQueue.put(new FuzzArgs(className, methodName, args, trials));
-                                    }
-                                } catch (NumberFormatException nfe) {
-                                    Log.e(tag, "OMG", nfe);
-                                    sendErrorMessage("Failed to parse number of trials (must be integer).");
-                                } catch (UnsupportedClassException uce) {
-                                    Log.e(tag, "OMG", uce);
-                                    sendErrorMessage("Invalid class name (currently supported are WifiService and AudioService).");
-                                } catch (Exception e) {
-                                    Log.e(tag, "OMG", e);
-                                    Log.d(tag, exceptionInterrupted);
-                                    break;
-                                }
-                            } else {
-                                sendErrorMessage(invalid);
-                            }
-                        } else {
-                            sendErrorMessage(classNotInitiated);
-                        }
-                    } else if (received[0].toLowerCase().equals("query")) {
-                        if (!className.equals("")) {
-                            if (received.length > 2) {
-                                String name = received[1].toLowerCase();
-                                if (name.equals("method")) {
-                                    name = received[2];
-                                    try {
-                                        String[] methodArgs = TestExecutor.getMethodArgs(caller, className, name);
-                                        StringBuilder sb = new StringBuilder(name);
-                                        sb.append("\n");
-                                        for (int i = 0; i < methodArgs.length; ++i) {
-                                            sb.append("Invocation ");
-                                            sb.append(i + 1);
-                                            sb.append(": ");
-                                            sb.append(methodArgs[i]);
-                                            sb.append("\n");
-                                        }
-                                        sendStringMessage(sb.toString());
-                                    } catch (NoSuchMethodException nsme) {
-                                        sendErrorMessage("No method " + name + " for class " + className + ".");
-                                    } catch (Exception e) {
-                                        Log.e(tag, "OMG", e);
-                                        Log.d(tag, exceptionInterrupted);
-                                        break;
-                                    }
-                                } else if (name.equals("class")) {
-                                    try {
-                                        String[] methodArgs = TestExecutor.getClassMethods(caller, className);
-                                        sendStringArrayMessage(methodArgs);
-                                    } catch (Exception e) {
-                                        Log.e(tag, "OMG", e);
-                                        Log.d(tag, exceptionInterrupted);
-                                        break;
-                                    }
-                                } else {
+                    } else if (receivedString[0].toLowerCase().equals("query")) {
+                        if (className.length() != 0) {
+                            String name = receivedString[1].toLowerCase();
+                            if (name.equals("method")) {
+                                if (receivedString.length > 2)
+                                    queryMethod(receivedString[2]);
+                                else
                                     sendErrorMessage(invalid);
-                                }
-                            } else {
+                            } else if (name.equals("class")) {
+                                if (receivedString.length > 1) {
+                                    String[] methodArgs = TestExecutor.getClassMethods(caller, className);
+                                    sendStringArrayMessage(methodArgs);
+                                } else
+                                    sendErrorMessage(invalid);
+                            } else
                                 sendErrorMessage(invalid);
-                            }
-                        } else {
+                        } else
                             sendErrorMessage(classNotInitiated);
-                        }
-                    } else if (received[0].toLowerCase().equals("initiate")) {
-                        if (received.length > 1) {
-                            initiateClass(received[1]);
-                        } else {
+                    } else if (receivedString[0].toLowerCase().equals("initiate")) {
+                        if (receivedString.length > 1)
+                            initiateClass(receivedString[1]);
+                        else
                             sendErrorMessage(invalid);
-                        }
-                    } else {
+                    } else
                         sendErrorMessage(invalid);
-                    }
-                }
-                else{
-                    if (!className.equals("")) {
+                } else {
+                    if (className.length() != 0) {
                         Log.d(tag, "Received an object array.");
-                        Object[] rec = (Object[]) receivedO;
-                        String methodName = (String)rec[0];
-                        int falseIndex = 1;
-                        while(falseIndex<rec.length && !(rec[falseIndex] instanceof Boolean))
-                            ++falseIndex;
-                        if(falseIndex>=rec.length)
-                            sendErrorMessage("WTF are these arguments?");
-                        else {
-                            Object[] argT = Arrays.copyOfRange(rec, 1, falseIndex);
-                            Class[] argTypes = new Class[argT.length];
-                            for(int i=0; i<argT.length; ++i)
-                                argTypes[i] = (Class)argT[i];
-                            Object[] args = Arrays.copyOfRange(rec, falseIndex+1, rec.length);
-                            argsQueue.put(new FuzzArgs(className, methodName, argTypes, args));
-                        }
-                    }else{
+                        addMethodToQueue((Object[]) receivedObject);
+                    } else
                         sendErrorMessage(classNotInitiated);
-                    }
                 }
             }
         } catch (Exception e) {
-            Log.e(tag, "Crash Test OMG", e);
+            Log.e(tag, e.getMessage(), e);
+            Log.d(tag, exceptionInterrupted);
         }
         closeClient();
         Log.d(tag, "The vessel has disconnected.");
     }
 
-    public void sendErrorMessage(String message) throws Exception {
+    private void startCommunication() throws IOException, Exception {
         try {
-            String[] error = {"ERROR: ", message};
-            oos.writeObject(error);
-            oos.flush();
-        } catch (Exception e) {
-            throw e;
-        }
-    }
-
-    private boolean initiateClass(String name) throws Exception{
-        try {
-            if (TestExecutor.knowsClass(name)) {
-                className = name;
-                Log.d(tag, envSet + className + ".");
-                sendStringMessage(envSet + className + ".");
-                return true;
+            ois = new ObjectInputStream(cSocket.getInputStream());
+            oos = new ObjectOutputStream(cSocket.getOutputStream());
+            String[] hello = (String[]) (ois.readObject());
+            if (hello.length < 1 || !(hello[0].toLowerCase().equals("hello")))
+                throw new Exception();
+            if (hello.length > 1) {
+                if (!initiateClass(hello[1]))
+                    Log.d(tag, classNotInitiated);
+            } else {
+                Log.d(tag, classNotInitiated);
+                sendStringMessage(classNotInitiated);
             }
+        } catch (IOException ioe) {
+            Log.e(tag, ioe.getMessage(), ioe);
+            closeClient();
+            throw ioe;
+        } catch (Exception e) {
+            Log.d(tag, "Invalid hello message (WTF). Exiting.");
+            sendErrorMessage("Invalid hello message. WTF?");
+            closeClient();
+            throw e;
+        }
+    }
+
+    private void queryMethod(String methodName) throws IOException {
+        try {
+            String[] methodArgs = TestExecutor.getMethodArgs(caller, className, methodName);
+            StringBuilder sb = new StringBuilder(methodName);
+            sb.append("\n");
+            for (int i = 0; i < methodArgs.length; ++i) {
+                sb.append("Invocation ");
+                sb.append(i + 1);
+                sb.append(": ");
+                sb.append(methodArgs[i]);
+                sb.append("\n");
+            }
+            sendStringMessage(sb.toString());
+        } catch (NoSuchMethodException nsme) {
+            sendErrorMessage("No method " + methodName + " for class " + className + ".");
+        }
+    }
+
+    private void addMethodToQueue(Object[] message) throws IOException {
+        String methodName = (String) message[0];
+        int falseIndex = 1;
+        while (falseIndex < message.length && !(message[falseIndex] instanceof Boolean))
+            ++falseIndex;
+        if (falseIndex >= message.length)
+            sendErrorMessage("Invalid message format.");
+        else {
+            Class[] argTypes = new Class[falseIndex - 1];
+            for (int i = 1; i < falseIndex; ++i)
+                argTypes[i - 1] = (Class) message[i];
+            Object[] args = Arrays.copyOfRange(message, falseIndex + 1, message.length);
+            if (argTypes.length != args.length)
+                sendErrorMessage("The number of arg types and args is not the same.");
             else
-                sendErrorMessage(unknownClassName);
-            return false;
-        }catch(Exception e){
-            throw e;
+                try {
+                    argsQueue.put(new FuzzArgs(className, methodName, argTypes, args));
+                } catch (InterruptedException ie) {
+                    sendErrorMessage("Could not handle method execution this time: method queue interrupted.");
+                }
         }
     }
 
-    public void sendFailsMessage(int fails) throws Exception {
-        try {
-            String[] message = {"Execution completed. Fails: ", fails + ""};
-            oos.writeObject(message);
-            oos.flush();
-        } catch (Exception e) {
-            throw e;
-        }
+
+    private boolean initiateClass(String name) throws IOException {
+        if (TestExecutor.knowsClass(name)) {
+            className = name;
+            Log.d(tag, envSet + className + ".");
+            sendStringMessage(envSet + className + ".");
+            return true;
+        } else
+            sendErrorMessage(unknownClassName);
+        return false;
     }
 
-    public void sendStringMessage(String message) throws Exception {
+
+    public void sendErrorMessage(String message) throws IOException {
+        String[] arr = {"ERROR: ", message};
+        sendStringArrayMessage(arr);
+    }
+
+    public void sendStringMessage(String message) throws IOException {
         String[] arr = {message};
-        try {
-            oos.writeObject(arr);
-            oos.flush();
-        } catch (Exception e) {
-            throw e;
-        }
+        sendStringArrayMessage(arr);
     }
 
-    public void sendStringArrayMessage(String[] message) throws Exception {
-        try {
-            oos.writeObject(message);
-            oos.flush();
-        } catch (Exception e) {
-            throw e;
-        }
+    private void sendStringArrayMessage(String[] message) throws IOException {
+        oos.writeObject(message);
+        oos.flush();
     }
 
     public void closeClient() {
