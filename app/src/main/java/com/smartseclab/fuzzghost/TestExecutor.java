@@ -1,17 +1,24 @@
 package com.smartseclab.fuzzghost;
 
 import android.content.Context;
+import android.os.Binder;
+import android.os.IBinder;
 import android.support.v4.util.ArrayMap;
 import android.util.Log;
 
 import java.lang.reflect.Constructor;
 import java.lang.reflect.Field;
+import java.lang.reflect.InvocationHandler;
 import java.lang.reflect.Method;
+import java.lang.reflect.Proxy;
+import java.lang.reflect.Type;
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.Map;
+import java.util.logging.Handler;
 
 import generator.shadows.ParcelableShadow;
+import generator.shadows.TypeVal;
 
 /**
  * The actual executor of server commands.
@@ -86,24 +93,25 @@ public class TestExecutor {
 
     private Object readFromShadow(ParcelableShadow ps) {
         Object instance;
+        Log.d(tag, "Reading from shadow: " + ps.getName());
         try {
             Class objType = context.getClassLoader().loadClass(ps.getName());
-            Constructor[] constructors = objType.getDeclaredConstructors();
-            if (constructors.length == 0) {
-                Log.d(tag, "No constructors found.");
-                return readFromPathologicalShadow(ps);
-            } else {
-                Object[] constructorArgs = ps.getConstructorArgs();
-                for (int i = 0; i < constructorArgs.length; ++i)
-                    if (constructorArgs[i] instanceof ParcelableShadow)
-                        constructorArgs[i] = readFromShadow((ParcelableShadow) constructorArgs[i]);
-                try {
-                    instance = getConstructorFromArgs(constructors, constructorArgs).newInstance(constructorArgs);
-                } catch (Exception e) {
-                    Log.e(tag, "OMG", e);
-                    return null;
-                }
+            if (IBinder.class.isAssignableFrom(objType)) {
+                return new Binder(); //empty binder might not be enough
             }
+            if (objType.isInterface()) {
+                InvocationHandler handler = new InvocationHandler() {
+                    @Override
+                    public Object invoke(Object proxy, Method method, Object[] args)
+                            throws Throwable {
+                        //This does nothing; should it do anything?
+                        return null;
+                    }
+                };
+                return Proxy.newProxyInstance(objType.getClassLoader(),
+                        new Class[]{objType}, handler);
+            }
+            instance = readFromConstructors(ps, objType);
         } catch (ClassNotFoundException cnfe) {
             Log.e(tag, "OMG", cnfe);
             return null;
@@ -112,7 +120,7 @@ public class TestExecutor {
             try {
                 Field field = instance.getClass().getField(key);
                 field.setAccessible(true);
-                field.set(instance, ps.getDatum(key));
+                field.set(instance, ps.getDatum(key).value);
             } catch (NoSuchFieldException nsfe) {
                 Log.d(tag, "No such field: " + key + " in " + ps.getName() + "; omitting.");
             } catch (IllegalAccessException iae) {
@@ -122,32 +130,56 @@ public class TestExecutor {
         return instance;
     }
 
+    private Object[] argsFromShadows(ParcelableShadow ps){
+        Object[] constructorArgs = ps.getConstructorArgs();
+        for (int i = 0; i < constructorArgs.length; ++i)
+            if (constructorArgs[i] instanceof ParcelableShadow)
+                constructorArgs[i] = readFromShadow((ParcelableShadow) constructorArgs[i]);
+        return constructorArgs;
+    }
+
+    private Object readFromConstructors(ParcelableShadow ps, Class objType){
+        Constructor[] constructors = objType.getDeclaredConstructors();
+        if (constructors.length == 0) {
+            Log.d(tag, "No constructors of class " + ps.getName() + " found.");
+            return readFromPathologicalShadow(ps);
+        } else {
+            Object[] constructorArgs = argsFromShadows(ps);
+            try {
+                Constructor constructor =  getConstructorFromArgs(constructors, constructorArgs);
+                constructor.setAccessible(true);
+                return constructor.newInstance(constructorArgs);
+            }
+            catch(NoSuchMethodException nsme){
+                Log.d(tag, "Invalid constructor arguments for class " + objType.getName() + "; returning null.");
+                return null;
+            }
+            catch (Exception e) {
+                Log.e(tag, "OMG", e);
+                return null;
+            }
+        }
+    }
+
     private Constructor getConstructorFromArgs(Constructor[] constructors, Object[] constructorArgs) throws NoSuchMethodException {
         for (Constructor c : constructors) {
             boolean ok = true;
             Class[] paramTypes = c.getParameterTypes();
-            for (int i = 0; i < constructorArgs.length && ok; ++i)
-                if (paramTypes[i].isAssignableFrom(constructorArgs[i].getClass()))
-                    ok = false;
+            if (paramTypes.length != constructorArgs.length)
+                continue;
+            else
+                for (int i = 0; i < constructorArgs.length && ok; ++i)
+                    if (!paramTypes[i].isAssignableFrom(constructorArgs[i].getClass()))
+                        ok = false;
             if (ok)
                 return c;
         }
         throw new NoSuchMethodException();
     }
 
-    //TODO: Handle as many possible pathologies as you can.
+    //TODO: Handle as many possible pathologies as you can. This will probably require storing a "how to get" field in Shadow.
     private Object readFromPathologicalShadow(ParcelableShadow ps) {
-        try {
-            Constructor constructor = context.getClassLoader().loadClass(ps.getName()).getDeclaredConstructor(); //if hidden
-            constructor.setAccessible(true);
-            return constructor.newInstance();
-        } catch (NoSuchMethodException nsme) {
-            Log.d(tag, "No hidden empty constructor.");
-            return null;
-        } catch (Exception e) {
-            Log.e(tag, e.getMessage(), e);
-            return null;
-        }
+        return null;
     }
 
     public static String[] getMethodArgs(Context context, String className, String methodName) throws NoSuchMethodException {
