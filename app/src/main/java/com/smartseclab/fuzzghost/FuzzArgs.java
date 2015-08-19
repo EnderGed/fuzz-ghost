@@ -1,7 +1,10 @@
 package com.smartseclab.fuzzghost;
 
 /**
- * The arguments sent to the blocking queue used to call the Executor's function.
+ * The arguments sent to the blocking queue used to call the Executor.It contains class name,
+ * method name, method arg types, method arg values and a boolean value indicating whether
+ * the work is over (set true at the end of Client connection to enable the Ghost to finish its
+ * execution properly). Everything is public for convenience reasons.
  */
 public class FuzzArgs {
     public String className;
@@ -13,7 +16,7 @@ public class FuzzArgs {
     /**
      * A regular constructor.
      */
-    public FuzzArgs(String className, String methodName, Class[] args, Object[] argVals){
+    public FuzzArgs(String className, String methodName, Class[] args, Object[] argVals) {
         this.className = className;
         this.methodName = methodName;
         this.args = args;
@@ -22,9 +25,10 @@ public class FuzzArgs {
     }
 
     /**
-     * The empty constructor set feierband to true: it indicates that the Ghost's job is finished and it may safely terminate.
+     * The empty constructor set feierband to true: it indicates that the Ghost's job is finished
+     * and it may safely terminate.
      */
-    public FuzzArgs(){
+    public FuzzArgs() {
         feierabend = true;
     }
 }

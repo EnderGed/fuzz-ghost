@@ -36,6 +36,9 @@ public class GhostTask implements Runnable {
         tag = MainActivity.getApplicationTag() + "Task";
     }
 
+    /**
+     * Run the Client.
+     */
     public void run() {
         try {
             cSocket = new Socket(address, port);
@@ -47,6 +50,9 @@ public class GhostTask implements Runnable {
         closeClient();
     }
 
+    /**
+     * Communicate with the Vessel. Receive and send messages.
+     */
     private void clientLoop() {
         try {
             startCommunication();
@@ -99,6 +105,12 @@ public class GhostTask implements Runnable {
         Log.d(tag, "The vessel has disconnected.");
     }
 
+    /**
+     * Try to connect to the Vessel. Receive and try to understand "Hello" message.
+     * Initiate tested class (if any given) and send adequate response.
+     * @throws IOException
+     * @throws Exception
+     */
     private void startCommunication() throws IOException, Exception {
         try {
             ois = new ObjectInputStream(cSocket.getInputStream());
@@ -125,6 +137,11 @@ public class GhostTask implements Runnable {
         }
     }
 
+    /**
+     * Query a method to get its argument types.
+     * @param methodName
+     * @throws IOException
+     */
     private void queryMethod(String methodName) throws IOException {
         try {
             String[] methodArgs = TestExecutor.getMethodArgs(caller, className, methodName);
@@ -143,6 +160,13 @@ public class GhostTask implements Runnable {
         }
     }
 
+    /**
+     * Upon receiving a method perform request, add its information to the Blocking Queue.
+     * The "false" index is a special mark used as a border between method argument types
+     * and values.
+     * @param message
+     * @throws IOException
+     */
     private void addMethodToQueue(Object[] message) throws IOException {
         String methodName = (String) message[0];
         int falseIndex = 1;
@@ -166,7 +190,12 @@ public class GhostTask implements Runnable {
         }
     }
 
-
+    /**
+     * Set a class which the tests will be performed upon.
+     * @param name
+     * @return
+     * @throws IOException
+     */
     private boolean initiateClass(String name) throws IOException {
         if (TestExecutor.knowsClass(name)) {
             className = name;
@@ -179,21 +208,40 @@ public class GhostTask implements Runnable {
     }
 
 
+    /**
+     * Send a String message informing of an error during execution.
+     * @param message
+     * @throws IOException
+     */
     public void sendErrorMessage(String message) throws IOException {
         String[] arr = {"ERROR: ", message};
         sendStringArrayMessage(arr);
     }
 
+    /**
+     * Send a String message.
+     * @param message
+     * @throws IOException
+     */
     public void sendStringMessage(String message) throws IOException {
         String[] arr = {message};
         sendStringArrayMessage(arr);
     }
 
+    /**
+     * Send a String Array message.
+     * @param message
+     * @throws IOException
+     */
     private void sendStringArrayMessage(String[] message) throws IOException {
         oos.writeObject(message);
         oos.flush();
     }
 
+    /**
+     * Close the Client connection. Ignore all exceptions. Insert the "feierband" info into
+     * the Blocking Queue.
+     */
     public void closeClient() {
         try {
             oos.close();

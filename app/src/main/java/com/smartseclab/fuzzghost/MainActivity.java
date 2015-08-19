@@ -16,6 +16,11 @@ public class MainActivity extends Activity {
     private String address;
     private ArrayBlockingQueue<FuzzArgs> queue;
 
+    /**
+     * Return a string with application tag (for logging purposes).
+     *
+     * @return
+     */
     public static String getApplicationTag() {
         return "FuzzGhost";
     }
@@ -43,13 +48,19 @@ public class MainActivity extends Activity {
         talk();
     }
 
-    public void doConnect() {
+    /**
+     * Create a blocking queue, run the client thread.
+     */
+    private void doConnect() {
         queue = new ArrayBlockingQueue<FuzzArgs>(10);
         gt = new GhostTask(port, address, this, queue);
         new Thread(gt).start();
     }
 
-    public void talk() {
+    /**
+     * "Talk" to the executor: keep receiving methods info from the Blocking Queue and trying to execute them.
+     */
+    private void talk() {
         TestExecutor executor;
         FuzzArgs fuzzArgs = null;
         while (true) {
@@ -59,9 +70,7 @@ public class MainActivity extends Activity {
                 if (fuzzArgs.feierabend)
                     break;
                 Log.d(appTag, "Queue released an element; performing test.");
-                String testResult = "Test completed with " + (new TestExecutor(this, fuzzArgs.className).runMethod(fuzzArgs.methodName, fuzzArgs.args, fuzzArgs.argVals) ? "success" : "fail") + ".";
-                Log.d(appTag, testResult);
-                gt.sendStringMessage(testResult);
+                performTest(fuzzArgs);
                 Log.d(appTag, "Finished.");
             } catch (NoSuchMethodException nsme) {
                 Log.e(appTag, nsme.getMessage(), nsme);
@@ -79,6 +88,19 @@ public class MainActivity extends Activity {
                 }
             }
         }
+    }
+
+    /**
+     * Perform a single test with the given method info. Send its results to the Vessel.
+     *
+     * @param fuzzArgs
+     * @throws Exception
+     */
+    private void performTest(FuzzArgs fuzzArgs) throws Exception {
+        Object testResult = new TestExecutor(this, fuzzArgs.className).runMethod(fuzzArgs.methodName, fuzzArgs.args, fuzzArgs.argVals);
+        String resultMessage = "Test completed with result: " + testResult.toString();
+        Log.d(appTag, resultMessage);
+        gt.sendStringMessage(resultMessage);
     }
 
     @Override
