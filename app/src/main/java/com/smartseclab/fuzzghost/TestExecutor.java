@@ -9,11 +9,6 @@ import java.util.ArrayList;
 import java.util.Collections;
 import java.util.Map;
 
-import generator.shadows.BundleShadow;
-import generator.shadows.FileDescriptorShadow;
-import generator.shadows.ParcelableShadow;
-import generator.shadows.SparseArrayShadow;
-
 /**
  * The actual executor of server commands.
  */
@@ -79,9 +74,10 @@ public class TestExecutor {
         Log.d(tag, "Method name: " + methodName);
         Log.d(tag, "Arguments: " + argTypes.length);
         for (int i = 0; i < args.length; ++i) {
-            argTypes[i] = retriever.readClass(args[i]);
-            args[i] = retriever.readObject(args[i]);
+            if(!argTypes[i].isPrimitive())
+                argTypes[i] = retriever.retrieveClass(args[i]);
         }
+        args = retriever.retrieveObjectArray(args);
         return execute(tClass.getDeclaredMethod(methodName, argTypes), args);
     }
 
