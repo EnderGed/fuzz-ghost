@@ -15,25 +15,25 @@ import java.util.concurrent.ArrayBlockingQueue;
 public class GhostTask implements Runnable {
 
     private int port;
-    private String address, tag, invalid, exceptionInterrupted, classNotInitiated, envSet, unknownClassName;
+    private String address, TAG;
     private String className = "";
     private MainActivity caller;
     private Socket cSocket;
     private ObjectOutputStream oos;
     private ObjectInputStream ois;
     private ArrayBlockingQueue<FuzzArgs> argsQueue;
+    private static final String exceptionInterrupted = "Execution interrupted by an exception.";
+    private static final String classNotInitiated = "Tested class has not been set yet.";
+    private static final String invalid = "Invalid command.";
+    private static final String envSet = "Test environment initiated for class.";
+    private static final String unknownClassName = "Unknown class name.";
 
-    public GhostTask(int port, String address, MainActivity caller, ArrayBlockingQueue<FuzzArgs> queue) {
+    public GhostTask(int port, String address, ArrayBlockingQueue<FuzzArgs> queue) {
         this.port = port;
-        this.caller = caller;
         this.argsQueue = queue;
         this.address = address;
-        exceptionInterrupted = caller.getString(R.string.exceptionInterrupted);
-        classNotInitiated = caller.getString(R.string.classNotInitiated);
-        invalid = caller.getString(R.string.invalid);
-        envSet = caller.getString(R.string.envSet);
-        unknownClassName = caller.getString(R.string.unknownClassName);
-        tag = MainActivity.getApplicationTag() + "Task";
+
+        TAG = MainActivity.getApplicationTag() + "Task";
     }
 
     /**
@@ -42,10 +42,10 @@ public class GhostTask implements Runnable {
     public void run() {
         try {
             cSocket = new Socket(address, port);
-            Log.d(tag, "Client started at port " + port + ".");
+            Log.d(TAG, "Client started at port " + port + ".");
             clientLoop();
         } catch (Exception e) {
-            Log.e(tag, e.getMessage(), e);
+            Log.e(TAG, e.getMessage(), e);
         }
         closeClient();
     }
@@ -55,91 +55,99 @@ public class GhostTask implements Runnable {
      */
     private void clientLoop() {
         try {
-            startCommunication();
+            initializeCommunication();
             while (true) {
                 Object receivedObject = ois.readObject();
                 if (receivedObject instanceof String[]) {
                     String[] receivedString = (String[]) (receivedObject);
-                    Log.d(tag, "Received a String array: " + receivedString[0].toLowerCase());
+                    Log.d(TAG, "Received a String array: " + receivedString[0].toLowerCase());
                     if (receivedString[0].toLowerCase().equals("goodbye")) {
-                        Log.d(tag, "Execution completed gracefully (server goodbye).");
+                        Log.d(TAG, "Execution completed gracefully (server goodbye).");
+                        MainActivity.stopLoop();
                         break;
                     } else if (receivedString[0].toLowerCase().equals("query")) {
                         if (className.length() != 0) {
                             String name = receivedString[1].toLowerCase();
-                            if (name.equals("method")) {
-                                if (receivedString.length > 2)
-                                    queryMethod(receivedString[2]);
-                                else
+                            switch (name) {
+                                case "method":
+                                    if (receivedString.length > 2) {
+                                        queryMethod(receivedString[2]);
+                                    } else {
+                                        sendErrorMessage(invalid);
+                                    }
+                                    break;
+                                case "class":
+                                    if (receivedString.length > 1) {
+                                        String[] methodArgs = TestExecutor.getClassMethods(caller, className);
+                                        sendStringArrayMessage(methodArgs);
+                                    } else {
+                                        sendErrorMessage(invalid);
+                                    }
+                                    break;
+                                default:
                                     sendErrorMessage(invalid);
-                            } else if (name.equals("class")) {
-                                if (receivedString.length > 1) {
-                                    String[] methodArgs = TestExecutor.getClassMethods(caller, className);
-                                    sendStringArrayMessage(methodArgs);
-                                } else
-                                    sendErrorMessage(invalid);
-                            } else
-                                sendErrorMessage(invalid);
-                        } else
+                                    break;
+                            }
+                        } else {
                             sendErrorMessage(classNotInitiated);
+                        }
                     } else if (receivedString[0].toLowerCase().equals("initiate")) {
-                        if (receivedString.length > 1)
+                        if (receivedString.length > 1) {
                             initiateClass(receivedString[1]);
-                        else
+                        } else {
                             sendErrorMessage(invalid);
-                    } else
+                        }
+                    } else {
                         sendErrorMessage(invalid);
+                    }
                 } else {
                     if (className.length() != 0) {
-                        Log.d(tag, "Received an object array.");
+                        Log.d(TAG, "Received an object array.");
                         addMethodToQueue((Object[]) receivedObject);
-                    } else
+                    } else {
                         sendErrorMessage(classNotInitiated);
+                    }
                 }
             }
-        } catch (Exception e) {
-            Log.e(tag, e.getMessage(), e);
-            Log.d(tag, exceptionInterrupted);
+        } catch(Exception e){
+            e.printStackTrace();
+
         }
+//        catch (Exception e) {
+//            Log.e(TAG, e.getMessage(), e);
+//            Log.d(TAG, exceptionInterrupted);
+//        }
         closeClient();
-        Log.d(tag, "The vessel has disconnected.");
+        Log.d(TAG, "The vessel has disconnected.");
     }
 
     /**
      * Try to connect to the Vessel. Receive and try to understand "Hello" message.
      * Initiate tested class (if any given) and send adequate response.
-     * @throws IOException
-     * @throws Exception
      */
-    private void startCommunication() throws IOException, Exception {
+    private void initializeCommunication() throws IOException{
         try {
             ois = new ObjectInputStream(cSocket.getInputStream());
             oos = new ObjectOutputStream(cSocket.getOutputStream());
             String[] hello = (String[]) (ois.readObject());
-            if (hello.length < 1 || !(hello[0].toLowerCase().equals("hello")))
-                throw new Exception();
+            if (hello.length < 1 || !(hello[0].toLowerCase().equals("hello"))) {
+                throw new IOException("Invalid handshake with server.");
+            }
             if (hello.length > 1) {
                 if (!initiateClass(hello[1]))
-                    Log.d(tag, classNotInitiated);
+                    Log.d(TAG, classNotInitiated);
             } else {
-                Log.d(tag, classNotInitiated);
+                Log.d(TAG, classNotInitiated);
                 sendStringMessage(classNotInitiated);
             }
-        } catch (IOException ioe) {
-            Log.e(tag, ioe.getMessage(), ioe);
-            closeClient();
-            throw ioe;
-        } catch (Exception e) {
-            Log.d(tag, "Invalid hello message (WTF). Exiting.");
-            sendErrorMessage("Invalid hello message. WTF?");
-            closeClient();
-            throw e;
+        }catch(ClassNotFoundException e){
+            e.printStackTrace();
+            throw new IOException("Invalid handshake object.");
         }
     }
 
     /**
      * Query a method to get its argument types.
-     * @param methodName
      * @throws IOException
      */
     private void queryMethod(String methodName) throws IOException {
@@ -164,16 +172,17 @@ public class GhostTask implements Runnable {
      * Upon receiving a method perform request, add its information to the Blocking Queue.
      * The "false" index is a special mark used as a border between method argument types
      * and values.
-     * @param message
      * @throws IOException
      */
     private void addMethodToQueue(Object[] message) throws IOException {
         String methodName = (String) message[0];
         int falseIndex = 1;
-        while (falseIndex < message.length && !(message[falseIndex] instanceof Boolean))
+        while (falseIndex < message.length && !(message[falseIndex] instanceof Boolean)) {
             ++falseIndex;
-        if (falseIndex >= message.length)
+        }
+        if (falseIndex >= message.length) {
             sendErrorMessage("Invalid message format.");
+        }
         else {
             Class[] argTypes = new Class[falseIndex - 1];
             for (int i = 1; i < falseIndex; ++i)
@@ -181,36 +190,35 @@ public class GhostTask implements Runnable {
             Object[] args = Arrays.copyOfRange(message, falseIndex + 1, message.length);
             if (argTypes.length != args.length)
                 sendErrorMessage("The number of arg types and args is not the same.");
-            else
+            else {
                 try {
                     argsQueue.put(new FuzzArgs(className, methodName, argTypes, args));
                 } catch (InterruptedException ie) {
                     sendErrorMessage("Could not handle method execution this time: method queue interrupted.");
                 }
+            }
         }
     }
 
     /**
      * Set a class which the tests will be performed upon.
-     * @param name
-     * @return
      * @throws IOException
      */
     private boolean initiateClass(String name) throws IOException {
         if (TestExecutor.knowsClass(name)) {
             className = name;
-            Log.d(tag, envSet + className + ".");
+            Log.d(TAG, envSet + className + ".");
             sendStringMessage(envSet + className + ".");
             return true;
-        } else
+        } else {
             sendErrorMessage(unknownClassName);
+        }
         return false;
     }
 
 
     /**
      * Send a String message informing of an error during execution.
-     * @param message
      * @throws IOException
      */
     public void sendErrorMessage(String message) throws IOException {
@@ -220,7 +228,6 @@ public class GhostTask implements Runnable {
 
     /**
      * Send a String message.
-     * @param message
      * @throws IOException
      */
     public void sendStringMessage(String message) throws IOException {
@@ -230,7 +237,6 @@ public class GhostTask implements Runnable {
 
     /**
      * Send a String Array message.
-     * @param message
      * @throws IOException
      */
     private void sendStringArrayMessage(String[] message) throws IOException {
@@ -246,18 +252,26 @@ public class GhostTask implements Runnable {
         try {
             oos.close();
         } catch (Exception e1) {
+            Log.e(TAG, "Error while closing ObjectOutputStream");
+            e1.printStackTrace();
         }
         try {
             ois.close();
         } catch (Exception e2) {
+            Log.e(TAG, "Error while closing ObjectInputStream");
+            e2.printStackTrace();
         }
         try {
             cSocket.close();
         } catch (Exception e3) {
+            Log.e(TAG, "Error while closing Socket");
+            e3.printStackTrace();
         }
         try {
             argsQueue.put(new FuzzArgs());
         } catch (Exception e4) {
+            Log.e(TAG, "Error while closing ObjectOutputStream");
+            e4.printStackTrace();
         }
     }
 

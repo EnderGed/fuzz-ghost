@@ -10,81 +10,86 @@ import java.util.concurrent.ArrayBlockingQueue;
 
 public class MainActivity extends Activity {
 
-    private int port;
-    private GhostTask gt;
-    private String appTag = getApplicationTag();
-    private String address;
-    private ArrayBlockingQueue<FuzzArgs> queue;
-
-    /**
-     * Return a string with application tag (for logging purposes).
-     *
-     * @return
-     */
-    public static String getApplicationTag() {
-        return "FuzzGhost";
-    }
+    private static int port = 7557;
+    private static String address = "10.0.2.2";
+    private static GhostTask gt;
+    private static String TAG = "FuzzGhost";
+    private static final int QueueMAXSIZE = 10;
+    private static boolean runLoop = false;
 
     @Override
     protected void onCreate(Bundle savedInstanceState) {
-        String defaultAddress = "10.0.2.2";
-        int defaultPort = 7557;
         super.onCreate(savedInstanceState);
         setContentView(R.layout.activity_main);
         Intent intent = getIntent();
+        getIPandPort(intent);
+        Log.i(TAG, "Port in use: " + port);
+        executeTests();
+    }
+
+    private void executeTests() {
+    /*
+    //TODO change it into normal queue, and settle stop condition
+     */
+        ArrayBlockingQueue<FuzzArgs> queue = new ArrayBlockingQueue<FuzzArgs>(QueueMAXSIZE);
+        doConnect(queue);
+        runLoop = true;
+        talk(queue);
+    }
+
+    /**
+     * Set IP address and port for connection if given in intent
+     */
+    private void getIPandPort(Intent intent) {
         if (intent.hasExtra("address"))
             address = intent.getStringExtra("address");
         else {
-            Log.d(appTag, "No address extra found, using default (" + defaultAddress + ").");
-            address = defaultAddress;
+            Log.d(TAG, "No address extra found.");
         }
+        Log.i(TAG, "IP in use: " + address);
         if (intent.hasExtra("port"))
-            port = intent.getIntExtra("port", defaultPort);
+            port = intent.getIntExtra("port", 7557);
         else {
-            Log.d(appTag, "No port extra found, using default (" + defaultPort + ").");
-            port = defaultPort;
+            Log.d(TAG, "No port extra found.");
         }
-        doConnect();
-        talk();
+        Log.i(TAG, "Port in use: " + port);
     }
 
     /**
      * Create a blocking queue, run the client thread.
      */
-    private void doConnect() {
-        queue = new ArrayBlockingQueue<FuzzArgs>(10);
-        gt = new GhostTask(port, address, this, queue);
+    private void doConnect(ArrayBlockingQueue<FuzzArgs> queue) {
+        gt = new GhostTask(port, address, queue);
         new Thread(gt).start();
     }
 
     /**
      * "Talk" to the executor: keep receiving methods info from the Blocking Queue and trying to execute them.
      */
-    private void talk() {
-        TestExecutor executor;
+    private void talk(ArrayBlockingQueue<FuzzArgs> queue) {
         FuzzArgs fuzzArgs = null;
-        while (true) {
+        while (runLoop) {
             try {
-                Log.d(appTag, "Waiting for queue input.");
+                Log.d(TAG, "Waiting for queue input.");
                 fuzzArgs = queue.take();
                 if (fuzzArgs.feierabend)
                     break;
-                Log.d(appTag, "Queue released an element; performing test.");
+                Log.d(TAG, "Queue released an element; performing test.");
                 performTest(fuzzArgs);
-                Log.d(appTag, "Finished.");
+                Log.d(TAG, "Finished.");
             } catch (NoSuchMethodException nsme) {
-                Log.e(appTag, nsme.getMessage(), nsme);
+                Log.e(TAG, nsme.getMessage(), nsme);
                 try {
                     gt.sendErrorMessage("No method " + fuzzArgs.methodName + " for specified args.");
                 } catch (Exception e) {
-                    Log.e(appTag, e.getMessage(), e);
+                    Log.e(TAG, e.getMessage(), e);
                 }
             } catch (Exception e) {
-                Log.e(appTag, e.getMessage(), e);
+                Log.e(TAG, e.getMessage(), e);
                 try {
                     gt.sendErrorMessage(e.getClass().getName());
                 } catch (Exception e1) {
-                    Log.e(appTag, e.getMessage(), e);
+                    Log.e(TAG, e.getMessage(), e);
                 }
             }
         }
@@ -99,7 +104,7 @@ public class MainActivity extends Activity {
     private void performTest(FuzzArgs fuzzArgs) throws Exception {
         Object testResult = new TestExecutor(this, fuzzArgs.className).runMethod(fuzzArgs.methodName, fuzzArgs.args, fuzzArgs.argVals);
         String resultMessage = "Test completed with result: " + testResult.toString();
-        Log.d(appTag, resultMessage);
+        Log.d(TAG, resultMessage);
         gt.sendStringMessage(resultMessage);
     }
 
@@ -112,4 +117,12 @@ public class MainActivity extends Activity {
         super.onDestroy();
     }
 
+
+    public static String getApplicationTag() {
+        return TAG;
+    }
+
+    public static void stopLoop(){
+        runLoop = false;
+    }
 }

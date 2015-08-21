@@ -1,13 +1,5 @@
 <resources>
     <string name="app_name">Fuzz Ghost</string>
-
     <string name="completed">Execution completed. Server disconnected.</string>
-    <string name="action_settings">Settings</string>
-
-    <string name="invalid">Invalid command.</string>
-    <string name="exceptionInterrupted">Execution interrupted by an exception.</string>
-    <string name="classNotInitiated">Tested class has not been set yet.</string>
-    <string name="envSet">Test environment initiated for class\ </string>
-    <string name="unknownClassName">Unknown class name.</string>
 
 </resources>
