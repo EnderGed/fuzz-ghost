@@ -9,6 +9,9 @@ import java.net.Socket;
 import java.util.Arrays;
 import java.util.concurrent.ArrayBlockingQueue;
 
+import fuzzcommons.HelloBye;
+import fuzzcommons.Command;
+
 /**
  * The task (actually a thread) responsible for the TCP communication.
  */
@@ -28,10 +31,11 @@ public class GhostTask implements Runnable {
     private static final String envSet = "Test environment initiated for class.";
     private static final String unknownClassName = "Unknown class name.";
 
-    public GhostTask(int port, String address, ArrayBlockingQueue<FuzzArgs> queue) {
+    public GhostTask(int port, String address, ArrayBlockingQueue<FuzzArgs> queue, MainActivity caller) {
         this.port = port;
         this.argsQueue = queue;
         this.address = address;
+        this.caller = caller;
 
         TAG = MainActivity.getApplicationTag() + "Task";
     }
@@ -58,65 +62,61 @@ public class GhostTask implements Runnable {
             initializeCommunication();
             while (true) {
                 Object receivedObject = ois.readObject();
-                if (receivedObject instanceof String[]) {
-                    String[] receivedString = (String[]) (receivedObject);
-                    Log.d(TAG, "Received a String array: " + receivedString[0].toLowerCase());
-                    if (receivedString[0].toLowerCase().equals("goodbye")) {
+                if (receivedObject instanceof Command) {
+                    Command command = (Command) receivedObject;
+                    Log.d(TAG, "Received command: " + command.getCommandType());
+                    switch (command.getCommandType()) {
+                        case DO:
+                            if (className.length() != 0) {
+                                if (command.getName() != null && command.getArgTypes() != null && command.getArgValues() != null)
+                                    try {
+                                        argsQueue.put(new FuzzArgs(className, command.getName(), command.getArgTypes(), command.getArgValues()));
+                                    } catch (InterruptedException ie) {
+                                        sendErrorMessage("Could not handle method execution this time: method queue interrupted.");
+                                    }
+                                else
+                                    sendErrorMessage(invalid);
+                            } else
+                                sendErrorMessage(classNotInitiated);
+                            break;
+                        case INITIATE:
+                            if (command.getName() != null)
+                                initiateClass(command.getName());
+                            else
+                                sendErrorMessage(invalid);
+                            break;
+                        case QUERY_CLASS:
+                            if (className.length() != 0) {
+                                String[] methodArgs = TestExecutor.getClassMethods(caller, className);
+                                sendStringArrayMessage(methodArgs);
+                            } else
+                                sendErrorMessage(classNotInitiated);
+                            break;
+                        case QUERY_METHOD:
+                            if (className.length() != 0) {
+                                if (command.getName() != null)
+                                    queryMethod(command.getName());
+                                else
+                                    sendErrorMessage(invalid);
+                            } else
+                                sendErrorMessage(classNotInitiated);
+                            break;
+                        default:
+                            sendErrorMessage(invalid);
+                            break;
+                    }
+                } else if (receivedObject instanceof HelloBye)
+                    if (((HelloBye) receivedObject).getGreeting() == HelloBye.Greeting.GOODBYE) {
                         Log.d(TAG, "Execution completed gracefully (server goodbye).");
                         MainActivity.stopLoop();
                         break;
-                    } else if (receivedString[0].toLowerCase().equals("query")) {
-                        if (className.length() != 0) {
-                            String name = receivedString[1].toLowerCase();
-                            switch (name) {
-                                case "method":
-                                    if (receivedString.length > 2) {
-                                        queryMethod(receivedString[2]);
-                                    } else {
-                                        sendErrorMessage(invalid);
-                                    }
-                                    break;
-                                case "class":
-                                    if (receivedString.length > 1) {
-                                        String[] methodArgs = TestExecutor.getClassMethods(caller, className);
-                                        sendStringArrayMessage(methodArgs);
-                                    } else {
-                                        sendErrorMessage(invalid);
-                                    }
-                                    break;
-                                default:
-                                    sendErrorMessage(invalid);
-                                    break;
-                            }
-                        } else {
-                            sendErrorMessage(classNotInitiated);
-                        }
-                    } else if (receivedString[0].toLowerCase().equals("initiate")) {
-                        if (receivedString.length > 1) {
-                            initiateClass(receivedString[1]);
-                        } else {
-                            sendErrorMessage(invalid);
-                        }
-                    } else {
-                        sendErrorMessage(invalid);
                     }
-                } else {
-                    if (className.length() != 0) {
-                        Log.d(TAG, "Received an object array.");
-                        addMethodToQueue((Object[]) receivedObject);
-                    } else {
-                        sendErrorMessage(classNotInitiated);
-                    }
-                }
             }
-        } catch(Exception e){
-            e.printStackTrace();
+        } catch (Exception e) {
+            Log.e(TAG, e.getMessage(), e);
+            Log.d(TAG, exceptionInterrupted);
 
         }
-//        catch (Exception e) {
-//            Log.e(TAG, e.getMessage(), e);
-//            Log.d(TAG, exceptionInterrupted);
-//        }
         closeClient();
         Log.d(TAG, "The vessel has disconnected.");
     }
@@ -125,29 +125,27 @@ public class GhostTask implements Runnable {
      * Try to connect to the Vessel. Receive and try to understand "Hello" message.
      * Initiate tested class (if any given) and send adequate response.
      */
-    private void initializeCommunication() throws IOException{
+    private void initializeCommunication() throws IOException {
         try {
             ois = new ObjectInputStream(cSocket.getInputStream());
             oos = new ObjectOutputStream(cSocket.getOutputStream());
-            String[] hello = (String[]) (ois.readObject());
-            if (hello.length < 1 || !(hello[0].toLowerCase().equals("hello"))) {
-                throw new IOException("Invalid handshake with server.");
-            }
-            if (hello.length > 1) {
-                if (!initiateClass(hello[1]))
+            HelloBye hello = (HelloBye) ois.readObject();
+            if (hello.getClassName() != null) {
+                if (!initiateClass(hello.getClassName()))
                     Log.d(TAG, classNotInitiated);
             } else {
                 Log.d(TAG, classNotInitiated);
                 sendStringMessage(classNotInitiated);
             }
-        }catch(ClassNotFoundException e){
-            e.printStackTrace();
+        } catch (ClassNotFoundException e) {
+            Log.e(TAG, e.getMessage(), e);
             throw new IOException("Invalid handshake object.");
         }
     }
 
     /**
      * Query a method to get its argument types.
+     *
      * @throws IOException
      */
     private void queryMethod(String methodName) throws IOException {
@@ -172,6 +170,7 @@ public class GhostTask implements Runnable {
      * Upon receiving a method perform request, add its information to the Blocking Queue.
      * The "false" index is a special mark used as a border between method argument types
      * and values.
+     *
      * @throws IOException
      */
     private void addMethodToQueue(Object[] message) throws IOException {
@@ -182,8 +181,7 @@ public class GhostTask implements Runnable {
         }
         if (falseIndex >= message.length) {
             sendErrorMessage("Invalid message format.");
-        }
-        else {
+        } else {
             Class[] argTypes = new Class[falseIndex - 1];
             for (int i = 1; i < falseIndex; ++i)
                 argTypes[i - 1] = (Class) message[i];
@@ -202,6 +200,7 @@ public class GhostTask implements Runnable {
 
     /**
      * Set a class which the tests will be performed upon.
+     *
      * @throws IOException
      */
     private boolean initiateClass(String name) throws IOException {
@@ -219,6 +218,7 @@ public class GhostTask implements Runnable {
 
     /**
      * Send a String message informing of an error during execution.
+     *
      * @throws IOException
      */
     public void sendErrorMessage(String message) throws IOException {
@@ -228,6 +228,7 @@ public class GhostTask implements Runnable {
 
     /**
      * Send a String message.
+     *
      * @throws IOException
      */
     public void sendStringMessage(String message) throws IOException {
@@ -237,6 +238,7 @@ public class GhostTask implements Runnable {
 
     /**
      * Send a String Array message.
+     *
      * @throws IOException
      */
     private void sendStringArrayMessage(String[] message) throws IOException {

@@ -22,7 +22,7 @@ public class MainActivity extends Activity {
         super.onCreate(savedInstanceState);
         setContentView(R.layout.activity_main);
         Intent intent = getIntent();
-        getIPandPort(intent);
+        getIPAndPort(intent);
         Log.i(TAG, "Port in use: " + port);
         executeTests();
     }
@@ -40,7 +40,7 @@ public class MainActivity extends Activity {
     /**
      * Set IP address and port for connection if given in intent
      */
-    private void getIPandPort(Intent intent) {
+    private void getIPAndPort(Intent intent) {
         if (intent.hasExtra("address"))
             address = intent.getStringExtra("address");
         else {
@@ -59,7 +59,7 @@ public class MainActivity extends Activity {
      * Create a blocking queue, run the client thread.
      */
     private void doConnect(ArrayBlockingQueue<FuzzArgs> queue) {
-        gt = new GhostTask(port, address, queue);
+        gt = new GhostTask(port, address, queue, this);
         new Thread(gt).start();
     }
 
